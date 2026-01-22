@@ -14,7 +14,7 @@
 
 ```bash
 # کلون کردن پروژه
-git clone https://github.com/YOUR_USERNAME/CFScanTolidIRAN.git
+git clone https://github.com/AghaFarokh/CF-Scan-TolidMelli.git
 cd CFScanTolidIRAN
 
 # اجرای برنامه
