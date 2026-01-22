@@ -15,7 +15,7 @@
 ```bash
 # کلون کردن پروژه
 git clone https://github.com/AghaFarokh/CF-Scan-TolidMelli.git
-cd CFScanTolidIRAN
+cd CF-Scan-TolidMelli
 
 # اجرای برنامه
 python cf_scanner.py
