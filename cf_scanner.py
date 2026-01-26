@@ -14,6 +14,8 @@ import threading
 import ipaddress
 import json
 import sys
+import os
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import List, Dict, Tuple, Optional
@@ -251,44 +253,68 @@ class CloudflareScanner:
 
     def save_result_incremental(self, result: Dict, filename: str = "working_ips.json"):
         """Save a single result immediately, keeping file sorted by speed"""
+        # Use atomic file write to prevent corruption
         try:
             # Read existing results
-            with open(filename, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                existing_results = data.get('working_ips', [])
-        except (FileNotFoundError, json.JSONDecodeError):
-            # First result - create new structure
-            data = {
-                'scan_date': datetime.now().isoformat(),
-                'test_domain': self.test_domain,
-                'total_scanned': 0,
-                'working_ips_count': 0,
-                'working_ips': []
-            }
-            existing_results = []
-        
-        # Add new result if not already present (avoid duplicates)
-        if not any(r['ip'] == result['ip'] for r in existing_results):
-            existing_results.append(result)
-        
-        # Sort by speed (descending - fastest first)
-        # Results without speed go to the end
-        existing_results.sort(key=lambda x: x.get('speed_kbps', -1), reverse=True)
-        
-        # Update metadata
-        data['working_ips'] = existing_results
-        data['working_ips_count'] = len(existing_results)
-        data['total_scanned'] = self.tested_count
-        
-        # Write back
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        
-        # Also update TXT file (sorted by speed)
-        txt_filename = filename.replace('.json', '.txt')
-        with open(txt_filename, 'w', encoding='utf-8') as f:
-            for r in existing_results:
-                f.write(f"{r['ip']}\n")
+            if os.path.exists(filename):
+                try:
+                    with open(filename, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        existing_results = data.get('working_ips', [])
+                except (json.JSONDecodeError, ValueError) as e:
+                    # File exists but is corrupted, start fresh
+                    print(f"Warning: {filename} is corrupted, starting fresh")
+                    existing_results = []
+                    data = {
+                        'scan_date': datetime.now().isoformat(),
+                        'test_domain': self.test_domain,
+                        'total_scanned': 0,
+                        'working_ips_count': 0,
+                        'working_ips': []
+                    }
+            else:
+                # First result - create new structure
+                data = {
+                    'scan_date': datetime.now().isoformat(),
+                    'test_domain': self.test_domain,
+                    'total_scanned': 0,
+                    'working_ips_count': 0,
+                    'working_ips': []
+                }
+                existing_results = []
+            
+            # Add new result if not already present (avoid duplicates)
+            if not any(r['ip'] == result['ip'] for r in existing_results):
+                existing_results.append(result)
+            
+            # Sort by speed (descending - fastest first)
+            # Results without speed go to the end
+            existing_results.sort(key=lambda x: x.get('speed_kbps', -1), reverse=True)
+            
+            # Update metadata
+            data['working_ips'] = existing_results
+            data['working_ips_count'] = len(existing_results)
+            data['total_scanned'] = self.tested_count
+            
+            # Atomic write: write to temp file first, then rename
+            temp_file = filename + '.tmp'
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            
+            # Atomic rename (replaces old file)
+            os.replace(temp_file, filename)
+            
+            # Also update TXT file (sorted by speed) - atomic write
+            txt_filename = filename.replace('.json', '.txt')
+            temp_txt = txt_filename + '.tmp'
+            with open(temp_txt, 'w', encoding='utf-8') as f:
+                for r in existing_results:
+                    f.write(f"{r['ip']}\n")
+            os.replace(temp_txt, txt_filename)
+            
+        except Exception as e:
+            print(f"Error saving result incrementally: {e}")
+            # Don't raise - we don't want to stop the scan if save fails
 
     def save_results(self, filename: str = "working_ips.json"):
         """Save results to JSON file"""
