@@ -173,6 +173,8 @@ class CloudflareScanner:
         if result:
             with self.lock:
                 self.results.append(result)
+                # Save immediately and keep file sorted
+                self.save_result_incremental(result)
                 print(f"✓ Found working IP: {result['ip']} - Latency: {result['latency_ms']}ms" +
                       (f" - Speed: {result.get('speed_kbps', 0):.2f} KB/s" if 'speed_kbps' in result else ""))
 
@@ -241,10 +243,52 @@ class CloudflareScanner:
         print(f"Scan rate: {self.tested_count/elapsed:.2f} IPs/s")
         print(f"{'='*60}\n")
 
-        # Sort results by latency
-        self.results.sort(key=lambda x: x.get('latency_ms', float('inf')))
+        # Sort results by speed (descending - fastest first)
+        # Results without speed go to the end
+        self.results.sort(key=lambda x: x.get('speed_kbps', -1), reverse=True)
 
         return self.results
+
+    def save_result_incremental(self, result: Dict, filename: str = "working_ips.json"):
+        """Save a single result immediately, keeping file sorted by speed"""
+        try:
+            # Read existing results
+            with open(filename, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                existing_results = data.get('working_ips', [])
+        except (FileNotFoundError, json.JSONDecodeError):
+            # First result - create new structure
+            data = {
+                'scan_date': datetime.now().isoformat(),
+                'test_domain': self.test_domain,
+                'total_scanned': 0,
+                'working_ips_count': 0,
+                'working_ips': []
+            }
+            existing_results = []
+        
+        # Add new result if not already present (avoid duplicates)
+        if not any(r['ip'] == result['ip'] for r in existing_results):
+            existing_results.append(result)
+        
+        # Sort by speed (descending - fastest first)
+        # Results without speed go to the end
+        existing_results.sort(key=lambda x: x.get('speed_kbps', -1), reverse=True)
+        
+        # Update metadata
+        data['working_ips'] = existing_results
+        data['working_ips_count'] = len(existing_results)
+        data['total_scanned'] = self.tested_count
+        
+        # Write back
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        
+        # Also update TXT file (sorted by speed)
+        txt_filename = filename.replace('.json', '.txt')
+        with open(txt_filename, 'w', encoding='utf-8') as f:
+            for r in existing_results:
+                f.write(f"{r['ip']}\n")
 
     def save_results(self, filename: str = "working_ips.json"):
         """Save results to JSON file"""
@@ -275,18 +319,18 @@ class CloudflareScanner:
             print("No working IPs found!")
             return
 
-        print(f"\nTop {min(count, len(self.results))} Working IPs:")
+        print(f"\nTop {min(count, len(self.results))} Working IPs (sorted by speed):")
         print(f"{'='*80}")
-        print(f"{'IP Address':<18} {'Latency':<12} {'Speed':<15} {'Status'}")
+        print(f"{'IP Address':<18} {'Speed':<15} {'Latency':<12} {'Status'}")
         print(f"{'-'*80}")
 
         for i, result in enumerate(self.results[:count]):
             ip = result['ip']
-            latency = f"{result['latency_ms']}ms"
             speed = f"{result.get('speed_kbps', 0):.2f} KB/s" if 'speed_kbps' in result else "N/A"
+            latency = f"{result['latency_ms']}ms"
             status = result['status']
 
-            print(f"{ip:<18} {latency:<12} {speed:<15} {status}")
+            print(f"{ip:<18} {speed:<15} {latency:<12} {status}")
 
         print(f"{'='*80}\n")
 
