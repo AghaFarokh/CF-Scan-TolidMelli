@@ -14,6 +14,7 @@ import threading
 import ipaddress
 import json
 import sys
+import signal
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import List, Dict, Tuple, Optional
@@ -35,6 +36,7 @@ class CloudflareScanner:
         self.tested_count = 0
         self.total_ips = 0
         self.output_file = config.get('output_file', 'working_ips')
+        self.stop_scan = False  # Flag to stop scanning
 
     def save_ip_realtime(self, result: Dict):
         """Save a single working IP immediately to file"""
@@ -172,6 +174,10 @@ class CloudflareScanner:
 
     def scan_ip(self, ip: str) -> Optional[Dict]:
         """Scan a single IP and return result if successful"""
+        # Check if scan should be stopped
+        if self.stop_scan:
+            return None
+
         # Use full HTTP test if download testing is enabled
         if self.test_download:
             result = self.test_ip_http(ip)
@@ -238,25 +244,45 @@ class CloudflareScanner:
         # Start scanning
         start_time = time.time()
 
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = {executor.submit(self.scan_ip, ip): ip for ip in ip_list}
+        try:
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                futures = {executor.submit(self.scan_ip, ip): ip for ip in ip_list}
 
-            for future in as_completed(futures):
                 try:
-                    future.result()
-                except Exception as e:
-                    pass
+                    for future in as_completed(futures):
+                        try:
+                            future.result()
+                        except Exception as e:
+                            pass
+                except KeyboardInterrupt:
+                    print("\n\n⚠ Scan interrupted by user! Stopping gracefully...")
+                    self.stop_scan = True
+
+                    # Cancel all pending futures
+                    for future in futures:
+                        future.cancel()
+
+                    # Shutdown executor and wait for running threads to finish
+                    executor.shutdown(wait=True, cancel_futures=True)
+                    raise
+
+        except KeyboardInterrupt:
+            pass  # Already handled above
 
         end_time = time.time()
         elapsed = end_time - start_time
 
         print(f"\n{'='*60}")
-        print(f"Scan Complete!")
+        if self.stop_scan:
+            print(f"Scan Interrupted!")
+        else:
+            print(f"Scan Complete!")
         print(f"{'='*60}")
         print(f"Total IPs scanned: {self.tested_count}")
         print(f"Working IPs found: {len(self.results)}")
         print(f"Time elapsed: {elapsed:.2f}s")
-        print(f"Scan rate: {self.tested_count/elapsed:.2f} IPs/s")
+        if elapsed > 0:
+            print(f"Scan rate: {self.tested_count/elapsed:.2f} IPs/s")
         print(f"{'='*60}\n")
 
         # Sort results by latency
@@ -327,7 +353,15 @@ def load_subnets_from_file(filename: str = 'subnets.txt') -> List[str]:
         return []
 
 
+def signal_handler(signum, frame):
+    """Handle Ctrl+C gracefully"""
+    raise KeyboardInterrupt
+
+
 def main():
+    # Setup signal handler for Ctrl+C
+    signal.signal(signal.SIGINT, signal_handler)
+
     # Load configuration
     try:
         with open('config.json', 'r', encoding='utf-8') as f:
@@ -384,9 +418,13 @@ def main():
 
 
 if __name__ == "__main__":
+    scanner = None
     try:
         main()
     except KeyboardInterrupt:
-        print("\n\nScan interrupted by user!")
-        print("Working IPs found so far have been saved to working_ips.txt")
+        print("\n\n⚠ Scan interrupted by user!")
+        print("✓ Working IPs found so far have been saved to working_ips.txt")
         sys.exit(0)
+    except Exception as e:
+        print(f"\n\n✗ Error occurred: {e}")
+        sys.exit(1)
