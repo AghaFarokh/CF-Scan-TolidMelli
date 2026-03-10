@@ -1,5 +1,10 @@
 {
-  "test_domain": "chatgpt.com",
+  "cdn": "cloudfront",
+  "cdn_test_domains": {
+    "cloudflare": "chatgpt.com",
+    "cloudfront": "aws.amazon.com",
+    "fastly": "github.githubassets.com"
+  },
   "test_path": "/",
   "timeout": 2,
   "max_workers": 1500,
@@ -8,8 +13,5 @@
   "port": 443,
   "randomize": true,
   "random_ips_per_range": 255,
-  "mix_ranges": false,
-  "subnets": [
-    "104.18.32.0/24"
-  ]
+  "mix_ranges": false
 }
