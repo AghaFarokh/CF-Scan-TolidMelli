@@ -36,9 +36,13 @@ ENV/
 .DS_Store
 
 # Output files
-working_ips.json
-working_ips.txt
+working_ips*.json
+working_ips*.txt
 *.log
+
+# Release archives
+*.zip
+*.tar.gz
 
 # Test results
 .pytest_cache/
