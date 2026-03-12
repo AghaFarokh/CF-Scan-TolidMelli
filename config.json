@@ -12,6 +12,6 @@
   "download_size": 102400,
   "port": 443,
   "randomize": true,
-  "random_ips_per_range": 20,
+  "random_ips_per_range": 255,
   "mix_ranges": true
 }
