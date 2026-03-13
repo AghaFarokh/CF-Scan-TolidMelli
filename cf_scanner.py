@@ -350,7 +350,10 @@ class CDNScanner:
 
         for network in ranges_24:
             try:
-                hosts = list(network.hosts())
+                # Use list(network) instead of network.hosts() so that .0 and
+                # .255 addresses are included — CDN edge IPs don't follow the
+                # traditional "network/broadcast reserved" convention.
+                hosts = list(network)
                 if self.randomize:
                     num_to_pick = min(self.random_ips_per_range, len(hosts))
                     ips = [str(ip) for ip in random.sample(hosts, num_to_pick)]

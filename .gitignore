@@ -51,3 +51,9 @@ htmlcov/
 
 # Local configuration (if needed)
 config.local.json
+
+# Private scripts (not for public repo)
+private/
+
+# Generated fronting IP lists (large, locally produced)
+subnets_*_fronting.txt
