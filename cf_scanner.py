@@ -16,6 +16,7 @@ import ipaddress
 import json
 import sys
 import signal
+import os
 import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -381,12 +382,34 @@ class CDNScanner:
                     except Exception:
                         pass
             except KeyboardInterrupt:
+                # User pressed Ctrl+C — attempt a graceful stop, then force exit
                 print("\n\n⚠ Scan interrupted by user! Stopping gracefully...")
                 self.stop_scan = True
                 for future in futures:
-                    future.cancel()
-                executor.shutdown(wait=True, cancel_futures=True)
-                raise
+                    try:
+                        future.cancel()
+                    except Exception:
+                        pass
+                # Try to stop accepting new work and don't wait for running threads here
+                try:
+                    # cancel_futures is available on Python 3.9+
+                    executor.shutdown(wait=False, cancel_futures=True)
+                except TypeError:
+                    try:
+                        executor.shutdown(wait=False)
+                    except Exception:
+                        pass
+
+                # Save partial results immediately (real-time file already being appended, but save JSON too)
+                try:
+                    self.save_results()
+                except Exception:
+                    pass
+
+                print("Exiting now.")
+                # Force the process to exit. This ensures the application terminates even if worker
+                # threads are blocked on network calls and cannot be cancelled.
+                os._exit(0)
 
     def scan_subnets(self, subnets: List[str]) -> List[Dict]:
         """Scan multiple subnets concurrently"""
